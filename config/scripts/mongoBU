@@ -1,0 +1,111 @@
+#!/usr/bin/perl
+use Time::Local;
+################################################################################
+my $actPid = $$;
+my $curPids = `/bin/pidof -x -o $actPid BU_MongoDB`; chomp $curPids;
+if ($curPids)
+{
+    print "Already running :: $curPids\n";
+    exit;
+}
+################################################################################
+$tgtServer = $ENV{'server'};
+$maxDays = $ENV{'maxdays'};
+print "Starting backup for  :: $tgtServer\n";
+################################################################################
+if (!$maxDays) { $maxDays = 3;}
+################################################################################
+($debug) = @ARGV;
+################################################################################
+my $time = time;    # or any other epoch timestamp
+my @months = ("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec");
+my ($sec, $min, $hour, $day,$month,$year) = (localtime($time))[0,1,2,3,4,5];
+########
+my $curEpoch = timelocal("00","00","00",int($day),int($month),int($year));
+########
+$year = $year + 1900;
+$month ++;
+################################################################################
+&cleanBU("/BU", $maxDays);
+################################################################################
+################################################################################
+my $dumpTime = `date +%Y%m%d_%H%M`; chomp $dumpTime;
+# my $dumpCMD = "/usr/bin/mongodump -o /BU/$dumpTime";
+my $dumpCMD = "/usr/bin/mongodump --host $tgtServer  --port 27017 -o /BU/$dumpTime";
+my $symCMD = "rm /BU/latest -f ; ln -s /BU/$dumpTime/ /BU/latest";
+################################################################################
+# print "DMP :: $dumpCMD\n";
+# print "SYM :: $symCMD\n";
+################################################################################
+`$dumpCMD 1>/tmp/mongoDB_BU.log 2>/tmp/mongoDB_BU.err`;
+################################################################################
+my $symOutput = `$symCMD`; chomp $symOutput;
+if ($symOutput)
+{
+        print "$symOutput\n";
+}
+# `rm /BU/Mongo/latest -f`;
+# `ln -s /BU/$dumpTime/ /BU/latest`;
+################################################################################
+# print "DMP :: $dumpCMD\n";
+# print "SYM :: $symCMD\n";
+################################################################################
+################################################################################
+sub cleanBU
+{
+    my ($path, $age) = @_;
+    ########
+    $minEpoch = $curEpoch - (86400 * $age);
+    ########
+    if ($debug)
+    {
+        print "Doing cleanBU for $path ($age)\n";
+    }
+    ########
+    opendir (DIR, $path);
+    @buList = readdir (DIR);
+    closedir(DIR);
+    @buList = sort(@buList);
+    foreach (@buList)
+    {
+        if (($_ !~ '\.') && ($_ ne "latest"))
+        {
+            my ($date, $time) = split("_", $_);
+            my $year = substr($date,0,4);
+            my $month = substr($date,4,2);
+            my $day = substr($date,6,2);
+            my $hour = substr($time,0,2);
+            my $min = substr($time,2,2);
+            #####
+            # print "FILE :: $_ :: $year :: $month :: $day :: $hour :: $min\n";
+            #####
+            $month --;
+            #####
+            my $buTime = timelocal("00",$min,$hour,int($day),int($month),int($year));
+            $month ++;
+            ####
+            $doDel = 0;
+            if ($buTime < $minEpoch) { $doDel = 1;}
+            ##########
+            # print " FILE :: $_ :: $buTime :: $minEpoch ($month/$day/$year :: $hour$min) :: $doDel\n";
+            ##########
+            $delCMD = "/bin/rm -rf $path/$_";
+            ####
+            if ($debug)
+            {
+                print "BU :: $_ :: $date :: $month/$day/$year :: ($buTime / $minEpoch) :: $doDel\n";
+            }
+            #####
+            # $doDel = 0;
+            #####
+            if ($doDel)
+            {
+                if ($debug)
+                {
+                    print "Removing $path/$_\n";
+                }
+                system ($delCMD);
+            }
+        }
+    }
+}
